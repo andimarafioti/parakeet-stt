@@ -58,23 +58,23 @@ def main():
     model.eval()
 
     print("Warming up…")
-    out = model.transcribe([audio], batch_size=1, verbose=False)
+    out = model.transcribe([wav_path], batch_size=1, verbose=False)
 
     times = []
     for _ in range(args.runs):
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        out = model.transcribe([audio], batch_size=1, verbose=False)
+        out = model.transcribe([wav_path], batch_size=1, verbose=False)
         torch.cuda.synchronize()
         times.append(time.perf_counter() - t0)
 
     dt = min(times)
     rtf = duration / dt if dt > 0 else 0
 
-    if hasattr(out[0], 'text'):
-        text = out[0].text.strip()
-    else:
-        text = str(out[0]).strip()
+    result = out[0]
+    if isinstance(result, list):
+        result = result[0]
+    text = (result.text if hasattr(result, 'text') else str(result)).strip()
 
     print(f"audio_s={duration:.2f}  time_s={dt:.4f}  RTF={rtf:.2f}  text={text!r}")
 
