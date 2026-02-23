@@ -7,7 +7,6 @@ name = "nano-parakeet"
 version = "0.1.0"
 description = "Pure-PyTorch Parakeet TDT inference — no NeMo required"
 readme = "README.md"
-license = { text = "MIT" }
 authors = [{ name = "Andrés Marafioti", email = "andimarafioti@users.noreply.github.com" }]
 requires-python = ">=3.10"
 keywords = ["speech", "asr", "transcription", "parakeet", "pytorch", "conformer"]
@@ -38,6 +37,9 @@ Issues = "https://github.com/andimarafioti/parakeet-stt/issues"
 
 [project.scripts]
 nano-parakeet = "nano_parakeet.__main__:main"
+
+[tool.setuptools]
+license-files = []
 
 [tool.setuptools.package-data]
 nano_parakeet = ["tokenizer.model"]
