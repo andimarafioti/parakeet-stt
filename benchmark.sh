@@ -39,7 +39,7 @@ trap 'rm -rf "$TMPDIR_BENCH"' EXIT
 
 echo "--- Baseline (NeMo) ---"
 echo "(Loading NeMo framework, takes ~30s…)"
-"$PY" "$DIR/benchmark.py" "$AUDIO" 2>/dev/null | tee "$TMPDIR_BENCH/nemo.txt"
+"$PY" "$DIR/benchmark.py" "$AUDIO" 2>/dev/null | tee "$TMPDIR_BENCH/nemo.txt" || true
 echo ""
 
 echo "--- PyTorch-first ---"
@@ -64,12 +64,15 @@ pr  = parse(pt,   'RTF')
 nt  = parse(nemo, 'time_s')
 pt_ = parse(pt,   'time_s')
 a   = parse(nemo, 'audio_s') or parse(pt, 'audio_s')
-sp  = pr / nr if (nr and pr) else 0
+sp  = pr / nr if (nr and pr) else None
+
+def fmt(v, fmt_spec, suffix=''):
+    return f'{v:{fmt_spec}}{suffix}' if v is not None else 'N/A'
 
 print(f"=== Results: {gpu} ===")
 print(f"{'':20} {'NeMo':>14} {'nano-parakeet':>14} {'Speedup':>9}")
 print(f"{'─'*59}")
-print(f"{'RTF':20} {nr:>13.1f}x {pr:>13.1f}x {sp:>8.1f}x")
-print(f"{'Inference time':20} {nt:>13.2f}s {pt_:>13.4f}s")
-print(f"{'Audio duration':20} {a:>13.1f}s")
+print(f"{'RTF':20} {fmt(nr,'>13.1f','x')} {fmt(pr,'>13.1f','x')} {fmt(sp,'>8.1f','x')}")
+print(f"{'Inference time':20} {fmt(nt,'>13.2f','s')} {fmt(pt_,'>13.4f','s')}")
+print(f"{'Audio duration':20} {fmt(a,'>13.1f','s')}")
 PYEOF
