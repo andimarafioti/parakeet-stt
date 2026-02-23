@@ -71,7 +71,7 @@ RTF > 1.0 = faster than real-time. 5 timed runs after a warm-up; best time repor
 Run both yourself:
 
 ```bash
-git clone https://github.com/andimarafioti/parakeet-stt
+git clone https://github.com/andimarafioti/nano-parakeet
 cd parakeet-stt
 ./benchmark.sh sample.wav
 ```

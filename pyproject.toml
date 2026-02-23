@@ -31,9 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/andimarafioti/parakeet-stt"
-Repository = "https://github.com/andimarafioti/parakeet-stt"
-Issues = "https://github.com/andimarafioti/parakeet-stt/issues"
+Homepage = "https://github.com/andimarafioti/nano-parakeet"
+Repository = "https://github.com/andimarafioti/nano-parakeet"
+Issues = "https://github.com/andimarafioti/nano-parakeet/issues"
 
 [project.scripts]
 nano-parakeet = "nano_parakeet.__main__:main"
