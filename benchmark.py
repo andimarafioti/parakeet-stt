@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import inspect
 import sys
 import time
 import tempfile
@@ -29,29 +28,6 @@ def load_audio(path: str):
         audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
         sr = 16000
     return audio.astype('float32'), sr
-
-
-def nemo_transcribe(model, wav_path):
-    """Call model.transcribe() compatible with both NeMo 1.x and 2.x."""
-    sig = inspect.signature(model.transcribe)
-    params = sig.parameters
-    kwargs = {}
-    if 'batch_size' in params:
-        kwargs['batch_size'] = 1
-    if 'verbose' in params:
-        kwargs['verbose'] = False
-    # NeMo 1.x: first arg is a list of paths
-    # NeMo 2.x: first arg may be named 'audio'
-    first_param = next(iter(params))
-    if first_param == 'audio':
-        kwargs['audio'] = [wav_path]
-        out = model.transcribe(**kwargs)
-    else:
-        out = model.transcribe([wav_path], **kwargs)
-    result = out[0]
-    if isinstance(result, list):
-        result = result[0]
-    return (result.text if hasattr(result, 'text') else str(result)).strip()
 
 
 def main():
@@ -84,7 +60,7 @@ def main():
 
     print("Warming up…")
     try:
-        text = nemo_transcribe(model, wav_path)
+        out = model.transcribe([audio], batch_size=1, verbose=False)
     except Exception as e:
         print(f"ERROR during warmup: {e}", file=sys.stdout)
         raise
@@ -93,12 +69,21 @@ def main():
     for _ in range(args.runs):
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        nemo_transcribe(model, wav_path)
+        out = model.transcribe([audio], batch_size=1, verbose=False)
         torch.cuda.synchronize()
         times.append(time.perf_counter() - t0)
 
     dt = min(times)
     rtf = duration / dt if dt > 0 else 0
+
+    # Normalize output across NeMo versions
+    if isinstance(out, tuple) and len(out) > 0:
+        out = out[0]
+    result = out[0]
+    if isinstance(result, list):
+        result = result[0]
+    text = (result.text if hasattr(result, 'text') else str(result)).strip()
+
     print(f"audio_s={duration:.2f}  time_s={dt:.4f}  RTF={rtf:.2f}  text={text!r}")
 
 
