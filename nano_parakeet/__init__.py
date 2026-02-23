@@ -3,9 +3,9 @@ import sentencepiece as spm
 from huggingface_hub import hf_hub_download
 
 from nano_parakeet._loader import get_bundled_tokenizer_proto, load_nemo_state_dict, remap_state_dict
-from nano_parakeet.model import ParakeetTDT
+from nano_parakeet.model import ParakeetTDT, TranscriptionResult
 
-__all__ = ['ParakeetTDT', 'from_pretrained']
+__all__ = ['ParakeetTDT', 'TranscriptionResult', 'from_pretrained']
 
 _MODEL_CACHE: dict = {}
 

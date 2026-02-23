@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nano_parakeet"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pure-PyTorch Parakeet TDT inference — no NeMo required"
 readme = "README.md"
 authors = [{ name = "Andrés Marafioti", email = "andimarafioti@users.noreply.github.com" }]

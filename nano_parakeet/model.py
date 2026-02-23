@@ -4,6 +4,7 @@ PyTorch-first Parakeet TDT model — no NeMo required at inference time.
 Architecture: FastConformer encoder + TDT (Token-and-Duration Transducer) decoder.
 """
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
@@ -11,6 +12,25 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+@dataclass
+class TranscriptionResult:
+    """Returned by transcribe(..., timestamps=True).
+
+    Attributes:
+        text: Full decoded transcript.
+        timestamp: Dict with keys 'char', 'word', 'segment', each a list of
+            dicts containing the text span and 'start'/'end' in seconds.
+
+    Example::
+
+        result = model.transcribe("audio.wav", timestamps=True)
+        for w in result.timestamp['word']:
+            print(f"{w['start']:.2f}s – {w['end']:.2f}s : {w['word']}")
+    """
+    text: str
+    timestamp: dict  # {'char': [...], 'word': [...], 'segment': [...]}
 
 
 class LogMelPreprocessor(nn.Module):
@@ -323,6 +343,110 @@ class TDTJoint(nn.Module):
         return self.joint_net(self.enc(enc_out) + self.pred(pred_out)).unsqueeze(2)
 
 
+def _frames_to_timestamps(
+    token_ids: list,
+    token_frames: list,
+    sp,
+    enc_len: int,
+) -> dict:
+    """Convert per-token encoder-frame ranges to char/word/segment timestamps.
+
+    Args:
+        token_ids:    List of token IDs from the decoder.
+        token_frames: List of (start_frame, end_frame) parallel to token_ids.
+        sp:           SentencePieceProcessor for piece→text mapping.
+        enc_len:      Total encoder sequence length (used to close the last span).
+    Returns:
+        dict with keys 'char', 'word', 'segment'.
+    """
+    # 1 encoder frame = 8 mel frames × hop_length / sample_rate = 80 ms
+    FRAME_S = 8 * 160 / 16_000  # 0.08 s
+
+    # Fix zero-duration tokens (skip=0, label-looping): extend to next token's start.
+    frames = list(token_frames)
+    for i in range(len(frames) - 1):
+        if frames[i][1] == frames[i][0]:
+            frames[i] = (frames[i][0], frames[i + 1][0])
+    if frames and frames[-1][1] == frames[-1][0]:
+        frames[-1] = (frames[-1][0], frames[-1][0] + 1)
+
+    char_ts  = []
+    word_ts  = []
+    curr_word_text   = ''
+    curr_word_start  = None
+    curr_word_end    = None
+    first_token      = True
+    SENT_END = {'.', '!', '?'}
+
+    for tok_id, (start_f, end_f) in zip(token_ids, frames):
+        piece        = sp.IdToPiece(tok_id)
+        is_word_start = piece.startswith('\u2581')   # '▁'
+        raw_text     = piece.lstrip('\u2581')
+
+        start_s = start_f * FRAME_S
+        end_s   = end_f   * FRAME_S
+
+        # --- char timestamps ---
+        # Prepend a space character for word-boundary tokens (except the first).
+        all_chars = ([' '] if is_word_start and not first_token else []) + list(raw_text)
+        n = max(len(all_chars), 1)
+        dur = (end_s - start_s) / n
+        for j, ch in enumerate(all_chars):
+            char_ts.append({
+                'char':  ch,
+                'start': round(start_s + j * dur, 3),
+                'end':   round(start_s + (j + 1) * dur, 3),
+            })
+
+        # --- word timestamps ---
+        if is_word_start and not first_token:
+            if curr_word_text:
+                word_ts.append({
+                    'word':  curr_word_text,
+                    'start': round(curr_word_start, 3),
+                    'end':   round(curr_word_end, 3),
+                })
+            curr_word_text  = raw_text
+            curr_word_start = start_s
+            curr_word_end   = end_s
+        else:
+            curr_word_text += raw_text
+            if curr_word_start is None:
+                curr_word_start = start_s
+            curr_word_end = end_s
+
+        first_token = False
+
+    # Flush last word.
+    if curr_word_text:
+        word_ts.append({
+            'word':  curr_word_text,
+            'start': round(curr_word_start, 3),
+            'end':   round(curr_word_end, 3),
+        })
+
+    # --- segment timestamps: split on sentence-ending punctuation ---
+    seg_ts   = []
+    curr_seg = []
+    for w in word_ts:
+        curr_seg.append(w)
+        if w['word'] and w['word'][-1] in SENT_END:
+            seg_ts.append({
+                'segment': ' '.join(x['word'] for x in curr_seg),
+                'start':   curr_seg[0]['start'],
+                'end':     curr_seg[-1]['end'],
+            })
+            curr_seg = []
+    if curr_seg:
+        seg_ts.append({
+            'segment': ' '.join(x['word'] for x in curr_seg),
+            'start':   curr_seg[0]['start'],
+            'end':     curr_seg[-1]['end'],
+        })
+
+    return {'char': char_ts, 'word': word_ts, 'segment': seg_ts}
+
+
 @torch.inference_mode()
 def tdt_greedy_decode(
     encoder_out: torch.Tensor,
@@ -332,12 +456,18 @@ def tdt_greedy_decode(
     blank_id: int,
     durations: list,
     max_symbols_per_step: int = 10,
+    return_timestamps: bool = False,
 ) -> list:
-    """TDT greedy decoding for a single sequence (mirrors NeMo's GreedyTDTInfer)."""
+    """TDT greedy decoding for a single sequence (mirrors NeMo's GreedyTDTInfer).
+
+    When return_timestamps=True returns (tokens, token_frames) where token_frames
+    is a list of (start_frame, end_frame) pairs in encoder-frame units.
+    """
     device = encoder_out.device
-    tokens  = []
-    hidden  = None
-    last_label = torch.tensor([[blank_id]], dtype=torch.long, device=device)
+    tokens       = []
+    token_frames = []  # (start_frame, end_frame) per token
+    hidden       = None
+    last_label   = torch.tensor([[blank_id]], dtype=torch.long, device=device)
 
     time_idx = 0
     skip     = 1
@@ -363,6 +493,8 @@ def tdt_greedy_decode(
                 need_loop = False
             else:
                 tokens.append(k)
+                if return_timestamps:
+                    token_frames.append((time_idx, time_idx + skip))
                 hidden     = hidden_prime
                 last_label = torch.tensor([[k]], dtype=torch.long, device=device)
 
@@ -376,6 +508,8 @@ def tdt_greedy_decode(
         if symbols_added == max_symbols_per_step:
             time_idx += 1
 
+    if return_timestamps:
+        return tokens, token_frames
     return tokens
 
 
@@ -427,10 +561,12 @@ class ParakeetTDT(nn.Module):
             self._g_logits = self.joint(self._g_f, pred)[0, 0, 0, :]
 
     @torch.inference_mode()
-    def transcribe_audio(self, audio: torch.Tensor) -> list[int]:
+    def transcribe_audio(self, audio: torch.Tensor,
+                         return_timestamps: bool = False):
         """
         audio: 1D float32 tensor, 16 kHz
-        Returns: list of token IDs
+        Returns: list of token IDs, or (token_ids, token_frames, enc_len) when
+                 return_timestamps=True.
         """
         device = next(self.parameters()).device
         if device.type == 'cuda' and self._decode_graph is None:
@@ -442,21 +578,24 @@ class ParakeetTDT(nn.Module):
         lengths  = torch.tensor([T], device=device, dtype=torch.long)
         with torch.autocast(device_type=device.type, dtype=torch.float16):
             enc_out, enc_lengths = self.encoder(features, lengths)
-        enc_len    = int(enc_lengths[0])
+        enc_len     = int(enc_lengths[0])
         encoder_out = enc_out[0].float()
 
         if self._decode_graph is not None:
-            return self._tdt_decode_graphed(encoder_out, enc_len)
+            return self._tdt_decode_graphed(encoder_out, enc_len, return_timestamps)
         return tdt_greedy_decode(
             encoder_out=encoder_out, enc_len=enc_len,
             decoder=self.decoder, joint=self.joint,
             blank_id=self.BLANK_ID, durations=self.DURATIONS,
+            return_timestamps=return_timestamps,
         )
 
-    def _tdt_decode_graphed(self, encoder_out: torch.Tensor, enc_len: int) -> list[int]:
+    def _tdt_decode_graphed(self, encoder_out: torch.Tensor, enc_len: int,
+                             return_timestamps: bool = False):
         """TDT greedy decode using the pre-captured CUDA graph for each step."""
-        n_dur  = len(self.DURATIONS)
-        tokens = []
+        n_dur        = len(self.DURATIONS)
+        tokens       = []
+        token_frames = []
 
         self._g_h.zero_()
         self._g_c.zero_()
@@ -472,14 +611,16 @@ class ParakeetTDT(nn.Module):
             while need_loop and symbols_added < 10:
                 self._decode_graph.replay()
 
-                k   = int(self._g_logits[:-n_dur].argmax())
-                d_k = int(F.log_softmax(self._g_logits[-n_dur:], dim=-1).argmax())
+                k    = int(self._g_logits[:-n_dur].argmax())
+                d_k  = int(F.log_softmax(self._g_logits[-n_dur:], dim=-1).argmax())
                 skip = self.DURATIONS[d_k]
 
                 if k == self.BLANK_ID:
                     need_loop = False
                 else:
                     tokens.append(k)
+                    if return_timestamps:
+                        token_frames.append((time_idx, time_idx + skip))
                     self._g_label.fill_(k)
                     self._g_h.copy_(self._g_h_out)
                     self._g_c.copy_(self._g_c_out)
@@ -493,15 +634,25 @@ class ParakeetTDT(nn.Module):
             if symbols_added == 10:
                 time_idx += 1
 
+        if return_timestamps:
+            return tokens, token_frames, enc_len
         return tokens
 
-    def transcribe(self, audio: Union[str, 'Path', np.ndarray, torch.Tensor]) -> str:
-        """Transcribe audio and return text.
+    def transcribe(
+        self,
+        audio: Union[str, 'Path', np.ndarray, torch.Tensor],
+        timestamps: bool = False,
+    ) -> 'str | TranscriptionResult':
+        """Transcribe audio and return text (or a TranscriptionResult with timestamps).
 
         Args:
-            audio: file path (str/Path), numpy array, or torch Tensor (16 kHz mono float32)
+            audio:      File path (str/Path), numpy array, or torch Tensor
+                        (16 kHz mono float32).
+            timestamps: When True, return a TranscriptionResult with char/word/
+                        segment-level timestamps instead of a plain string.
         Returns:
-            Decoded text string
+            str when timestamps=False (default).
+            TranscriptionResult when timestamps=True.
         """
         if self.sp is None:
             raise RuntimeError("No tokenizer loaded. Use from_pretrained() to load the model.")
@@ -516,5 +667,12 @@ class ParakeetTDT(nn.Module):
         else:
             audio_t = audio
 
-        token_ids = self.transcribe_audio(audio_t)
-        return self.sp.DecodeIds(token_ids).strip()
+        if not timestamps:
+            token_ids = self.transcribe_audio(audio_t)
+            return self.sp.DecodeIds(token_ids).strip()
+
+        result = self.transcribe_audio(audio_t, return_timestamps=True)
+        token_ids, token_frames, enc_len = result
+        text = self.sp.DecodeIds(token_ids).strip()
+        ts   = _frames_to_timestamps(token_ids, token_frames, self.sp, enc_len)
+        return TranscriptionResult(text=text, timestamp=ts)
