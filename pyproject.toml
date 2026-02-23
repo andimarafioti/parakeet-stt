@@ -6,7 +6,23 @@ build-backend = "setuptools.build_meta"
 name = "nano-parakeet"
 version = "0.1.0"
 description = "Pure-PyTorch Parakeet TDT inference — no NeMo required"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Andrés Marafioti", email = "andimarafioti@users.noreply.github.com" }]
 requires-python = ">=3.10"
+keywords = ["speech", "asr", "transcription", "parakeet", "pytorch", "conformer"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
 dependencies = [
     "torch",
     "numpy",
@@ -14,6 +30,11 @@ dependencies = [
     "sentencepiece",
     "huggingface-hub",
 ]
+
+[project.urls]
+Homepage = "https://github.com/andimarafioti/parakeet-stt"
+Repository = "https://github.com/andimarafioti/parakeet-stt"
+Issues = "https://github.com/andimarafioti/parakeet-stt/issues"
 
 [project.scripts]
 nano-parakeet = "nano_parakeet.__main__:main"
