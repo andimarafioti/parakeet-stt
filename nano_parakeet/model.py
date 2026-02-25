@@ -574,10 +574,17 @@ class ParakeetTDT(nn.Module):
             self._build_decode_graph(device)
 
         audio    = audio.to(device)
-        features = self.preprocessor(audio)
+        features = self.preprocessor(audio)  # always fp32 (STFT requires it)
         T        = features.shape[-1]
-        lengths  = torch.tensor([T], device=device, dtype=torch.long)        
-        enc_out, enc_lengths = self.encoder(features, lengths)
+        lengths  = torch.tensor([T], device=device, dtype=torch.long)
+        # Run encoder in fp16 via autocast for float32 models (uses tensor cores),
+        # or cast features to the model's native dtype for bfloat16/fp16 models.
+        enc_dtype = next(self.encoder.parameters()).dtype
+        if enc_dtype == torch.float32:
+            with torch.autocast(device_type=device.type, dtype=torch.float16):
+                enc_out, enc_lengths = self.encoder(features, lengths)
+        else:
+            enc_out, enc_lengths = self.encoder(features.to(enc_dtype), lengths)
         enc_len     = int(enc_lengths[0])
         encoder_out = enc_out[0].float()
 

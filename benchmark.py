@@ -54,7 +54,7 @@ def main():
 
     import nemo.collections.asr as nemo_asr
 
-    model = nemo_asr.models.EncDecRNNTBPEModel.from_pretrained(model_name=args.model).to(torch.bfloat16)
+    model = nemo_asr.models.EncDecRNNTBPEModel.from_pretrained(model_name=args.model)
     model = model.cuda()
     model.eval()
 
