@@ -61,7 +61,7 @@ RTF > 1.0 = faster than real-time. 5 timed runs after a warm-up; best time repor
 | GPU | Audio | NeMo RTF | nano-parakeet RTF | Speedup |
 |---|---|---|---|---|
 | RTX 4090 | 12s | ~207× | ~519× | **2.5×** |
-| Jetson AGX Orin 64GB | 12s | ~73× | ~92× | **1.3×** |
+| Jetson AGX Orin 64GB | 12s | ~84× | ~112× | **1.3×** |
 
 > **Note (RTX 4090):** NeMo is run with `strategy='greedy'` (single-item, not batch).
 > The default `greedy_batch` strategy uses TDT label-looping CUDA graphs that fail to compile
@@ -113,7 +113,7 @@ Weights are loaded directly from the `.nemo` file (a ZIP archive) without import
 
 | | Encoder | Decoder | Effect |
 |---|---|---|---|
-| fp16 autocast | ✓ | ✗ | tensor cores for 1024→4096→1024 FFN matmuls × 24 layers |
+| bfloat16 (auto, Ampere+) | ✓ | ✓ | native low-precision on modern GPUs; fp16 autocast fallback on older devices |
 | CUDA graph | ✗ | ✓ | ~20 kernel launches per decode step → 1 graph replay |
 
 ## Jetson Setup

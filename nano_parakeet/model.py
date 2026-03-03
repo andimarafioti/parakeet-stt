@@ -576,8 +576,13 @@ class ParakeetTDT(nn.Module):
         audio    = audio.to(device)
         features = self.preprocessor(audio)
         T        = features.shape[-1]
-        lengths  = torch.tensor([T], device=device, dtype=torch.long)        
-        enc_out, enc_lengths = self.encoder(features, lengths)
+        lengths  = torch.tensor([T], device=device, dtype=torch.long)
+        enc_dtype = next(self.encoder.parameters()).dtype
+        if enc_dtype == torch.float32:
+            with torch.amp.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == 'cuda')):
+                enc_out, enc_lengths = self.encoder(features, lengths)
+        else:
+            enc_out, enc_lengths = self.encoder(features.to(enc_dtype), lengths)
         enc_len     = int(enc_lengths[0])
         encoder_out = enc_out[0].float()
 
