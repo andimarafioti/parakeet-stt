@@ -470,8 +470,8 @@ def tdt_greedy_decode(
     last_label   = torch.tensor([[blank_id]], dtype=torch.long, device=device)
 
     time_idx = 0
-    skip     = 1
     while time_idx < enc_len:
+        frame_start = time_idx
         f = encoder_out[time_idx].unsqueeze(0).unsqueeze(0)  # [1, 1, d_model]
 
         symbols_added = 0
@@ -502,11 +502,10 @@ def tdt_greedy_decode(
             time_idx      += skip
             need_loop      = need_loop and (skip == 0)
 
-        if skip == 0:
-            skip = 1
-
-        if symbols_added == max_symbols_per_step:
-            time_idx += 1
+        # Guard against a blank token with zero duration, which would otherwise
+        # leave time_idx unchanged and loop forever on the same encoder frame.
+        if time_idx <= frame_start:
+            time_idx = frame_start + 1
 
     if return_timestamps:
         return tokens, token_frames
@@ -607,8 +606,8 @@ class ParakeetTDT(nn.Module):
         self._g_label.fill_(self.BLANK_ID)
 
         time_idx = 0
-        skip     = 1
         while time_idx < enc_len:
+            frame_start = time_idx
             self._g_f.copy_(encoder_out[time_idx].unsqueeze(0).unsqueeze(0))
 
             symbols_added = 0
@@ -634,10 +633,10 @@ class ParakeetTDT(nn.Module):
                 time_idx      += skip
                 need_loop      = need_loop and (skip == 0)
 
-            if skip == 0:
-                skip = 1
-            if symbols_added == 10:
-                time_idx += 1
+            # Guard against a blank token with zero duration, which would otherwise
+            # leave time_idx unchanged and loop forever on the same encoder frame.
+            if time_idx <= frame_start:
+                time_idx = frame_start + 1
 
         if return_timestamps:
             return tokens, token_frames, enc_len
