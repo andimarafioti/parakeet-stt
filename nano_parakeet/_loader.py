@@ -9,10 +9,20 @@ import torch
 
 def load_nemo_state_dict(nemo_path: str, map_location='cpu') -> dict:
     """Load a state dict directly from a .nemo file without the NeMo framework."""
+    cache_dir = os.path.expanduser(os.environ.get("NANO_PARAKEET_CACHE", "~/.cache/nano_parakeet"))
+    os.makedirs(cache_dir, exist_ok=True)
+
+    nemo_stat = os.stat(nemo_path)
+    cache_file = os.path.join(
+        cache_dir, f"parakeet_tdt_0.6b_{int(nemo_stat.st_mtime)}_{nemo_stat.st_size}.pt"
+    )
+
+    if os.path.isfile(cache_file) and os.path.getsize(cache_file) > 0:
+        return torch.load(cache_file, map_location=map_location, weights_only=False)
+
     z = zipfile.ZipFile(nemo_path)
     entries = [n for n in z.namelist() if n.startswith('model_weights/')]
-    tmpdir = tempfile.mkdtemp()
-    tmp_pt = os.path.join(tmpdir, 'model.pt')
+    tmp_pt = cache_file + ".tmp"
     try:
         writer = torch._C.PyTorchFileWriter(tmp_pt)
         for entry in entries:
@@ -23,9 +33,11 @@ def load_nemo_state_dict(nemo_path: str, map_location='cpu') -> dict:
             writer.write_record(name, data, len(data))
         writer.write_end_of_file()
         del writer
-        state_dict = torch.load(tmp_pt, map_location=map_location, weights_only=False)
+        os.replace(tmp_pt, cache_file)
+        state_dict = torch.load(cache_file, map_location=map_location, weights_only=False)
     finally:
-        shutil.rmtree(tmpdir)
+        if os.path.exists(tmp_pt):
+            os.remove(tmp_pt)
     return state_dict
 
 
